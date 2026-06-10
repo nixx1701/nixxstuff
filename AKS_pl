@@ -1,0 +1,77 @@
+name: AKS CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  TF_VERSION: "1.7.0"
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  AKS_RESOURCE_GROUP: "rg-aks-prod"
+  AKS_CLUSTER_NAME: "aks-prod"
+
+jobs:
+  terraform:
+    name: Provision AKS with Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Azure Login (Service Principal)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ env.AZURE_CLIENT_SECRET }}
+
+      - name: Terraform Init
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -auto-approve tfplan
+
+  deploy:
+    name: Deploy Workloads to AKS
+    needs: terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ env.AZURE_CLIENT_SECRET }}
+
+      - name: Get AKS Credentials
+        run: |
+          az aks get-credentials \
+            --resource-group $AKS_RESOURCE_GROUP \
+            --name $AKS_CLUSTER_NAME \
+            --overwrite-existing
+
+      - name: Deploy Kubernetes Manifests
+        run: |
+          kubectl apply -f manifests/
