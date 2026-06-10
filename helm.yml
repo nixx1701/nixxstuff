@@ -1,0 +1,4 @@
+- name: Deploy Helm Chart
+  run: |
+    helm upgrade --install myapp charts/myapp \
+      --namespace prod --create-namespace
